@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.py[cod]
+data/
+.DS_Store
+
+models/
+models/
+results/transformer/chunking_*_predictions.csv
+results/baselines/predictions_*.csv
+
+# Backup scripts
+*.bak
+*.pre_overwrite_fix.bak
+*.pre_run_tag_fix.bak
+*.pre_tag_fix.bak
+
+# Generated results and model outputs
+results/
+models/
+
+# Local resume files
+sample_resume.pdf

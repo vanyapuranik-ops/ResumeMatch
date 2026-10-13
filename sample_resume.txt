@@ -1,0 +1,15 @@
+Professional Summary
+
+Machine Learning Engineer with experience in Python, machine learning, deep learning, natural language processing, and data analysis.
+
+Technical Skills
+Python, SQL, TensorFlow, PyTorch, scikit-learn, pandas, NumPy, NLP, model evaluation, feature engineering.
+
+Experience
+Developed classification models, cleaned and analyzed datasets, evaluated model performance using precision, recall and F1-score, and built data processing pipelines. Worked on transformer-based NLP projects and collaborated with software development teams.
+
+Education
+Bachelor of Technology in Artificial Intelligence and Machine Learning.
+
+Projects
+Built a text classification system, experimented with transformer models, and developed predictive analytics solutions.
