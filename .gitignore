@@ -21,3 +21,4 @@ models/
 
 # Local resume files
 sample_resume.pdf
+results/transformer/stress_short_*_rows.csv
