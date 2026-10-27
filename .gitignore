@@ -22,3 +22,31 @@ models/
 # Local resume files
 sample_resume.pdf
 results/transformer/stress_short_*_rows.csv
+
+# Local environments and secrets
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Local datasets, model weights and backups
+role_training_pack/*.csv
+role_training_pack/role_distilbert_v1/
+role_training_pack/v2_experiment_32class/trained_models/
+backups/
+test_inputs/
+*.safetensors
+pytorch_model.bin
+*.pt
+*.pth
+*.ckpt
+
+# Local personal files
+*resume*.pdf
+*resume*.docx
+*resume*.txt
+.DS_Store

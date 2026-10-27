@@ -1,0 +1,45 @@
+{
+  "dataset_name": "ResumeMatch 12-class role classification candidate dataset",
+  "source_rows_before_review": 2172,
+  "excluded_rows": [
+    {
+      "source_row_id": "1559",
+      "reason": "Mixed Big Data platform support / data-science title; not a clean developer-role training example."
+    },
+    {
+      "source_row_id": "4772",
+      "reason": "Resume excerpt appears dominated by scraped/non-resume website text; unsuitable training text."
+    },
+    {
+      "source_row_id": "6835",
+      "reason": "Resume excerpt emphasizes ERP techno-functional consulting rather than a clear software-development role."
+    }
+  ],
+  "rows_after_exclusions": 2169,
+  "classes": {
+    "Big Data/Hadoop Developer": 71,
+    "Data Integration/ETL Developer": 376,
+    "Database Administrator": 126,
+    "Database/SQL Developer": 104,
+    "Frontend/UI Developer": 103,
+    "Java/J2EE Developer": 154,
+    "Mobile Application Developer": 81,
+    "Network Engineer": 92,
+    "QA/Test Engineer": 461,
+    "Software Developer/Engineer": 151,
+    "Systems Administrator": 128,
+    "Technical Support Engineer": 322
+  },
+  "split_sizes": {
+    "train": 1518,
+    "validation": 325,
+    "test": 326
+  },
+  "split_random_state": 42,
+  "split_strategy": "Stratified 70/15/15. Resume_group_id was checked; groups are unique in the provided clean dataset, so group separation does not add further constraints.",
+  "label_caveat": "Labels are candidate roles derived from job-title rules and are not fully human-verified ground truth. Results must be reported with this limitation.",
+  "unresolved_rows_retained": [
+    "4109",
+    "5341"
+  ]
+}

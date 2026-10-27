@@ -107,6 +107,22 @@ def resumematch_write_predictions(va_idx, va_pred, te_idx, te_pred, classes, pat
     return resumematch_sha256(path), len(frame)
 
 
+def head_tail_ids(tok, texts, max_len, tail_tokens):
+    """Head+tail truncation: texts longer than max_len - 2 content tokens keep their first
+    (max_len - 2 - tail_tokens) and last tail_tokens tokens, wrapped in [CLS]/[SEP]. Shorter texts are
+    unchanged and equal the standard truncation=True output. No labels are used."""
+    budget = max_len - 2
+    if not 0 < tail_tokens < budget:
+        raise ValueError("tail_tokens must be between 1 and max_len - 3")
+    full = tok(texts, add_special_tokens=False, verbose=False)["input_ids"]
+    out = []
+    for ids in full:
+        if len(ids) > budget:
+            ids = ids[:budget - tail_tokens] + ids[-tail_tokens:]
+        out.append([tok.cls_token_id] + ids + [tok.sep_token_id])
+    return out
+
+
 def set_seed(seed):
     import torch
     random.seed(seed)
@@ -133,7 +149,10 @@ def run(args, texts, y, classes, tr_idx, va_idx, te_idx, benchmark):
         ids = []
         for s in range(0, len(idx), 128):
             chunk = [texts[i] for i in idx[s:s + 128]]
-            ids += tok(chunk, truncation=True, max_length=args.max_len)["input_ids"]
+            if args.truncation == "head":
+                ids += tok(chunk, truncation=True, max_length=args.max_len)["input_ids"]
+            else:
+                ids += head_tail_ids(tok, chunk, args.max_len, args.tail_tokens)
         return ids
 
     pad_id = tok.pad_token_id
@@ -268,6 +287,9 @@ def run(args, texts, y, classes, tr_idx, va_idx, te_idx, benchmark):
         "classes_with_test_support": int(len(set(y_te.tolist()))),
         "history": history, "test_metrics": m,
     }
+    if args.truncation != "head":
+        report["hyperparameters"]["truncation"] = args.truncation
+        report["hyperparameters"]["tail_tokens"] = args.tail_tokens
     (OUT_DIR / ("metrics_" + tag + ".json")).write_text(json.dumps(report, indent=2), encoding="utf-8")
     prediction_info = None
 
@@ -353,6 +375,10 @@ def main():
     p.add_argument("--patience", type=int, default=2)
     p.add_argument("--bench-batches", type=int, default=12)
     p.add_argument("--save-model", action="store_true")
+    p.add_argument("--truncation", choices=["head", "head_tail"], default="head",
+                   help="head = first max-len tokens (default); head_tail = first and last tokens")
+    p.add_argument("--tail-tokens", type=int, default=128,
+                   help="tokens kept from the end of a long resume when --truncation head_tail")
     p.add_argument("--save-predictions", action="store_true",
                    help="save row indices and predicted labels without resume text")
     p.add_argument("--save-artifacts", action="store_true",
@@ -363,6 +389,8 @@ def main():
     mode.add_argument("--benchmark", action="store_true", help="time a few steps only")
     mode.add_argument("--run-training", action="store_true", help="full fine-tuning run")
     args = p.parse_args()
+    if args.truncation == "head_tail" and not 0 < args.tail_tokens < args.max_len - 2:
+        sys.exit("ERROR: --tail-tokens must be between 1 and max-len - 3")
     if args.run_name and (
         not args.run_name.isascii()
         or not args.run_name.replace("-", "").replace("_", "").isalnum()
@@ -385,6 +413,7 @@ def main():
     print("Smallest validation class count: {} | classes missing from validation: {}".format(
         int(np.bincount(y[va_idx], minlength=len(classes)).min()), len(miss_val)))
     print("Experiment:", args.experiment)
+    print("Truncation:", args.truncation + (" (tail {} tokens)".format(args.tail_tokens) if args.truncation == "head_tail" else ""))
 
     tag = resumematch_run_tag(args)
     if args.save_predictions or args.save_artifacts or args.save_model:

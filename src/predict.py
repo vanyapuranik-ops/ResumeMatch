@@ -6,7 +6,6 @@ import re
 import sys
 from pathlib import Path
 
-import pdfplumber
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -16,6 +15,14 @@ DEFAULT_MANIFEST = ROOT / "results" / "transformer" / "manifest_B_seed42_artifac
 MAX_LENGTH = 512
 HEAD_CHARS = 100
 PLACEHOLDER = "categorymask"
+
+# Input checks (P1). 50 words is the refusal floor; 113 is the shortest resume in the training data;
+# the 250-word and 0.70 values come from validation analysis and are provisional, as is the letter share.
+MIN_WORDS_REFUSE = 50
+BELOW_TRAINING_MIN_WORDS = 113
+SHORT_WARN_WORDS = 250
+LOW_CONFIDENCE = 0.70
+MIN_LETTER_SHARE = 0.60
 
 
 def norm(value):
@@ -35,6 +42,8 @@ def mask_category_names(text, category_names):
 
 
 def extract_pdf_text(path):
+    import pdfplumber  # imported here so plain-text resumes do not need pdfplumber
+
     pages = []
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
@@ -78,6 +87,63 @@ def predict(resume_text, model, tokenizer, label2id, device):
     return results
 
 
+def assess_input(text):
+    """Pre-prediction checks. Reads the text only; it never changes what the model sees."""
+    stripped = text.strip()
+    words = len(stripped.split())
+    non_space = [c for c in stripped if not c.isspace()]
+    letter_share = sum(c.isalpha() for c in non_space) / len(non_space) if non_space else 0.0
+    out = {"words": words, "letter_share": letter_share, "refuse": None, "warnings": []}
+    if words == 0:
+        out["refuse"] = "The resume text is empty. Please provide a resume with its experience, skills and education."
+    elif words < MIN_WORDS_REFUSE:
+        out["refuse"] = (
+            "Only {} words were found. A recommendation needs at least {} words of resume content "
+            "(resumes in the training data have several hundred), so no category scores were generated. "
+            "Please provide a more complete resume.".format(words, MIN_WORDS_REFUSE))
+    else:
+        if words < BELOW_TRAINING_MIN_WORDS:
+            out["warnings"].append(
+                "This resume has {} words, fewer than any resume the model was trained on (the shortest had {}). "
+                "The recommendation may be less reliable.".format(words, BELOW_TRAINING_MIN_WORDS))
+        elif words < SHORT_WARN_WORDS:
+            out["warnings"].append(
+                "This resume has {} words, shorter than typical training resumes (median about 757). In a validation "
+                "test, accuracy was lower on shortened resumes, so the recommendation may be less reliable.".format(words))
+        if letter_share < MIN_LETTER_SHARE:
+            out["warnings"].append(
+                "Fewer than {:.0%} of the characters are letters, so the text may not be normal resume prose "
+                "(for example a PDF extraction problem).".format(MIN_LETTER_SHARE))
+    return out
+
+
+def confidence_notes(results):
+    """Notes about how to read the scores. Scores themselves are never altered.
+    Reliability figures are observed rates on the held-out seed-42 test set (497 resumes)."""
+    lines = []
+    top = results[0]["score"]
+    if top <= LOW_CONFIDENCE:
+        lines.append(
+            "LOW CONFIDENCE: the top score ({:.2%}) is at or below {:.0%}. In the validation analysis, predictions "
+            "at or below this level were correct about 37% of the time, against about 94% above it. Treat the "
+            "category as a weak suggestion.".format(top, LOW_CONFIDENCE))
+        lines.append(
+            "In held-out testing, predictions at or below {:.0%} were correct 47.5% of the time (118 resumes), and "
+            "the correct category was among the top 3 for 88.7% of all test resumes. Treat the three listed "
+            "categories as a shortlist, not a single answer.".format(LOW_CONFIDENCE))
+        lines.append(
+            "The {:.0%} threshold is provisional: it was chosen using validation data, and the held-out test "
+            "figures come from one model and one split.".format(LOW_CONFIDENCE))
+    else:
+        lines.append(
+            "In held-out testing, predictions scoring above {:.0%} were correct 92.9% of the time (379 of 497 "
+            "resumes). That is an observed rate for resumes like the test set, not a guarantee for this "
+            "resume.".format(LOW_CONFIDENCE))
+    lines.append("Scores are softmax model outputs, not calibrated probabilities; they do not give the chance "
+                 "that a category is correct.")
+    return lines
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Predict likely job categories from a resume PDF or text file."
@@ -104,12 +170,29 @@ def main():
         sys.exit("ERROR: Manifest does not contain the expected 24-category label mapping.")
 
     if file_path.suffix.lower() == ".pdf":
-        resume_text = extract_pdf_text(file_path)
+        try:
+            resume_text = extract_pdf_text(file_path)
+        except ImportError:
+            pdf_error = "PDF support needs pdfplumber, which is not installed. Run: pip install pdfplumber"
+        except ValueError as exc:
+            pdf_error = str(exc)
+        except Exception as exc:  # corrupt, encrypted or otherwise unreadable PDF
+            pdf_error = ("The PDF could not be read ({}). It may be corrupted, password-protected "
+                         "or not a real PDF.".format(type(exc).__name__))
+        else:
+            pdf_error = None
+        if pdf_error:
+            print("\nResumeMatch could not make a recommendation.")
+            print(pdf_error)
+            sys.exit(2)
     else:
         resume_text = file_path.read_text(encoding="utf-8").strip()
 
-    if len(resume_text) < 30:
-        sys.exit("ERROR: Resume text is empty or too short to classify reliably.")
+    assessment = assess_input(resume_text)
+    if assessment["refuse"]:
+        print("\nResumeMatch could not make a recommendation.")
+        print(assessment["refuse"])
+        sys.exit(2)
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
@@ -125,8 +208,19 @@ def main():
     print("\nTop category scores (not calibrated probabilities):")
     for item in results:
         print("  {}: {:.2%}".format(item["category"], item["score"]))
+    print("\nInput checks")
+    print("------------")
+    print("Words in resume:", assessment["words"])
+    total_tokens = len(tokenizer(mask_category_names(resume_text, list(label2id.keys())),
+                                 verbose=False)["input_ids"])
+    used_tokens = min(total_tokens, MAX_LENGTH)
+    unread = "" if total_tokens <= MAX_LENGTH else " (the rest of the resume was not read)"
+    print("Tokens read by the model: {} of {}{}".format(used_tokens, total_tokens, unread))
+    for warning in assessment["warnings"]:
+        print("WARNING:", warning)
+    for line in confidence_notes(results):
+        print(line)
     print("\nDevice:", device)
-    print("Input tokens are truncated to", MAX_LENGTH, "tokens.")
     print("Scores are model outputs, not guarantees of candidate suitability.")
 
 
